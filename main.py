@@ -26,9 +26,46 @@ def send_chat_action(chat_id, action="typing"):
     except Exception:
         pass
 
+def clean_text_for_telegram(text):
+    if not text:
+        return ""
+    cleaned = re.sub(r'</?[a-zA-Z][^>]*>', '', text)
+    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned)
+    cleaned = re.sub(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', r'\1', cleaned)
+    cleaned = cleaned.replace('&amp;', '&').replace('&quot;', '"').replace('&lt;', '<').replace('&gt;', '>')
+    return cleaned.strip()
+
+def split_text_into_chunks(text, max_len=3700):
+    if len(text) <= max_len:
+        return [text]
+    chunks = []
+    paragraphs = text.split("\n\n")
+    current_chunk = ""
+    for p in paragraphs:
+        if len(p) > max_len:
+            lines = p.split("\n")
+            for line in lines:
+                if len(current_chunk) + len(line) + 1 > max_len:
+                    if current_chunk.strip():
+                        chunks.append(current_chunk.strip())
+                    current_chunk = line + "\n"
+                else:
+                    current_chunk += line + "\n"
+        else:
+            if len(current_chunk) + len(p) + 2 > max_len:
+                if current_chunk.strip():
+                    chunks.append(current_chunk.strip())
+                current_chunk = p + "\n\n"
+            else:
+                current_chunk += p + "\n\n"
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    return chunks
+
 def send_telegram_message(chat_id, text):
-    max_len = 4000
-    chunks = [text[i:i + max_len] for i in range(0, len(text), max_len)]
+    clean_text = clean_text_for_telegram(text)
+    chunks = split_text_into_chunks(clean_text, max_len=3700)
+    total_parts = len(chunks)
     
     keyboard = {
         "keyboard": [
@@ -41,26 +78,30 @@ def send_telegram_message(chat_id, text):
     }
 
     for idx, chunk in enumerate(chunks):
+        formatted_chunk = chunk
+        if total_parts > 1:
+            if idx == 0:
+                formatted_chunk = f"{chunk}\n\n[Bagian 1/{total_parts}] ⏩ (Bersambung...)"
+            else:
+                formatted_chunk = f"[Bagian {idx+1}/{total_parts}] 📄 (Lanjutan)\n\n{chunk}"
+
         payload = {
             "chat_id": chat_id,
-            "text": chunk,
-            "parse_mode": "HTML"
+            "text": formatted_chunk
         }
         if idx == len(chunks) - 1:
             payload["reply_markup"] = keyboard
 
         try:
-            r = requests.post(
+            requests.post(
                 f"{TELEGRAM_API_URL}/sendMessage",
                 json=payload,
                 timeout=10
             )
-            if not r.json().get("ok"):
-                # Fallback without parse_mode if HTML entities failed
-                payload.pop("parse_mode", None)
-                requests.post(f"{TELEGRAM_API_URL}/sendMessage", json=payload, timeout=10)
         except Exception as e:
             print(f"[ERROR] Failed to send message: {e}")
+        if total_parts > 1:
+            time.sleep(1)
 
 def get_webpage_text(url):
     try:
@@ -151,6 +192,18 @@ def invoke_critical_analysis(topic, source_url=None):
 def index():
     return "✅ Apollo Telegram Bot (Vercel 24/7 Cloud) is running!", 200
 
+@app.route("/diag", methods=["GET"])
+def diag():
+    token_status = "OK (Terbaca)" if TELEGRAM_BOT_TOKEN else "KOSONG (Belum diset di Vercel)"
+    gemini_status = "OK (Terbaca)" if GEMINI_API_KEY else "KOSONG (Belum diset di Vercel)"
+    chat_status = f"OK ({AUTHORIZED_CHAT_ID})" if AUTHORIZED_CHAT_ID else "TIDAK DIBATASI (Semua chat diterima)"
+    return jsonify({
+        "status": "online",
+        "telegram_bot_token": token_status,
+        "gemini_api_key": gemini_status,
+        "authorized_chat_id": chat_status
+    }), 200
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = request.get_json(silent=True)
@@ -165,25 +218,22 @@ def webhook():
     if not text:
         return jsonify({"ok": True}), 200
 
-    if AUTHORIZED_CHAT_ID and chat_id != str(AUTHORIZED_CHAT_ID).strip():
-        return jsonify({"ok": True}), 200
-
     # 1. Command Dasar
     if text.lower() == "/start":
         welcome = (
             f"👋 Halo {user_name}!\n\n"
-            "Saya <b>Apollo Bot</b> yang berjalan 24 jam nonstop di Cloud (Vercel) "
-            "ditenagai <b>Gemini 3.5 Flash Lite</b>! 🧠⚡\n\n"
-            "• 🧠 <b>Analisis Kritis</b>: <code>/analisis [topik/link]</code>\n"
-            "• 🌐 <b>Web Reader</b>: Kirim link artikel web apa saja\n"
-            "• 🌦️ <b>Cuaca Live</b>: <code>Cuaca di Nabire</code>\n"
-            "• 💬 <b>Chat AI Cerdas</b>: Bebas tanya apa saja"
+            "Saya Apollo Bot yang berjalan 24 jam nonstop di Cloud (Vercel) "
+            "ditenagai Gemini 3.5 Flash Lite! 🧠⚡\n\n"
+            "• 🧠 Analisis Kritis: /analisis [topik/link]\n"
+            "• 🌐 Web Reader: Kirim link artikel web apa saja\n"
+            "• 🌦️ Cuaca Live: Cuaca di Nabire\n"
+            "• 💬 Chat AI Cerdas: Bebas tanya apa saja langsung di sini!"
         )
         send_telegram_message(chat_id, welcome)
         return jsonify({"ok": True}), 200
 
-    if text.lower() in ["/ping", "🏓 ping bot"]:
-        send_telegram_message(chat_id, "🏓 <b>Pong!</b>\n\nBot aktif 24 jam di Vercel Cloud dengan lancar! ☁️✅")
+    if text.lower() in ["/ping", "🏓 ping bot", "ping"]:
+        send_telegram_message(chat_id, "🏓 Pong!\n\nBot aktif 24 jam di Vercel Cloud dengan lancar! ☁️✅")
         return jsonify({"ok": True}), 200
 
     if text.lower() in ["/reset", "🔄 reset sesi ai"]:
