@@ -13,6 +13,22 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
+def clean_text_for_telegram(text):
+    """
+    Membersihkan total seluruh tag HTML (seperti <b>, </b>, <i>, <a>, dll)
+    dan format mentah agar chat Telegram selalu tampil bersih, rapi, dan elegan.
+    """
+    if not text:
+        return ""
+    # Hapus semua tag HTML kurung siku <...>
+    cleaned = re.sub(r'</?[a-zA-Z][^>]*>', '', text)
+    # Hapus markdown asterisks ** atau *
+    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned)
+    cleaned = re.sub(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', r'\1', cleaned)
+    # Kembalikan entitas HTML ke karakter normal
+    cleaned = cleaned.replace('&amp;', '&').replace('&quot;', '"').replace('&lt;', '<').replace('&gt;', '>')
+    return cleaned.strip()
+
 def get_live_rss_items(feed_url, fallback_title, fallback_url, max_items=3):
     items = []
     try:
@@ -48,9 +64,22 @@ def ask_gemini_critical(topic_name, news_items):
         for idx, it in enumerate(news_items[1:], 2):
             related_context += f"{idx}. Judul: {it['title']}\n   URL: {it['link']}\n"
     
+    # Audit Trail special injection for Pillar 2 (Audit Keuangan RI)
+    audit_guide = ""
+    if "Audit" in topic_name:
+        audit_guide = """
+PEDOMAN KHUSUS AUDIT TRAILS (STANDAR SPKN & UU PERBENDAHARAAN NEGARA):
+- Uji Jejak Audit (Audit Trail): Telusuri apakah ada indikasi putusnya jejak dokumen (DIPA -> BAST -> SPM -> SP2D).
+- Deteksi Titik Kritis: Soroti potensi manipulasi termin, pencairan mendahului prestasi kerja, atau penyimpangan rekening tujuan.
+"""
+
+    citation_list = ""
+    for idx, it in enumerate(news_items, 1):
+        citation_list += f"{idx}. {it['title']}\n   🔗 {it['link']}\n"
+
     prompt = f"""
-Anda adalah Senior Critical Analyst & Strategic Intelligence Specialist.
-Tugas Anda: Membedah isu nyata ini secara tajam, mendalam, objektif, bebas framing, dan berbobot eksekutif.
+Anda adalah Senior Critical Analyst, Audit Specialist & Strategic Intelligence Specialist.
+Tugas Anda: Membedah isu nyata ini secara mendalam, objektif, tanpa bias, dan berbobot eksekutif.
 
 Topik Intelijen: {topic_name}
 Berita Utama (Live RSS):
@@ -58,26 +87,25 @@ Berita Utama (Live RSS):
 - URL: {primary['link']}
 - Ringkasan: {primary['desc']}
 {related_context}
+{audit_guide}
 
-Format Analisis (Gunakan 5 Pilar Berpikir Kritis & Tag HTML <b>, <i>):
-📡 <b>1. Sinyal Utama (The Signal):</b> Fakta konkret, data riil, dan peristiwa inti yang terverifikasi dari artikel.
-⚙️ <b>2. Mekanisme & Akar Masalah:</b> Bagaimana ini terjadi? Bedah rantai kausalitas, teknis, atau regulasi di balik layar.
-🔍 <b>3. Uji Kritis & Titik Buta (Blind Spots):</b> Dekonstruksi framing media, bias informasi, atau variabel penting yang tidak dibahas di publik.
-🌊 <b>4. Dampak Turunan (Second-Order Effects):</b> Efek domino jangka panjang terhadap sektor/ekosistem terkait.
-💡 <b>5. Sudut Pandang Analis (Analyst Lens):</b> 1 prinsip mental model atau pedoman rasional untuk pengambilan keputusan.
+Format Analisis Wajib (Gunakan 5 Pilar Berpikir Kritis):
+📡 1. SINYAL UTAMA (THE SIGNAL): Fakta konkret, angka riil, dan peristiwa inti yang terverifikasi dari artikel.
+⚙️ 2. MEKANISME & AKAR MASALAH: Bagaimana ini terjadi? Bedah rantai kausalitas, regulasi, tata kelola, atau audit trail di baliknya.
+🔍 3. UJI KRITIS & TITIK BUTA (BLIND SPOTS): Dekonstruksi framing media, bias informasi, atau variabel penting yang tidak dibahas di publik.
+🌊 4. DAMPAK TURUNAN (SECOND-ORDER EFFECTS): Efek domino jangka panjang terhadap sektor/ekosistem terkait atau keuangan negara.
+💡 5. SUDUT PANDANG ANALIS (ANALYST LENS): 1 prinsip mental model atau pedoman rasional pengambilan keputusan.
 
-INSTRUKSI SITASI & RUJUKAN LENGKAP (WAJIB & TIDAK BOLEH TERPOTONG):
-Di bagian paling bawah analisis, Anda WAJIB membuat daftar rujukan lengkap dan detail untuk SEMUA berita di atas:
-📚 <b>Rujukan Berita & Sumber Terverifikasi:</b>
-1. <b>{primary['title']}</b>
-   🔗 <a href="{primary['link']}">{primary['link']}</a>
+INSTRUKSI RUJUKAN LENGKAP:
+Di akhir analisis, Anda WAJIB membuat daftar rujukan lengkap dan detail untuk SEMUA berita di atas:
+📚 RUJUKAN BERITA & SUMBER TERVERIFIKASI:
+{citation_list}
+
+ATURAN FORMATTING WAJIB (SANGAT PENTING):
+1. DILARANG KERAS menggunakan tag HTML seperti <b>, </b>, <i>, </i>, <a>, </a>, <br> atau tanda kurung sudut < > apapun!
+2. Gunakan huruf kapital, emoji, dan bullet point (•) untuk penataan teks agar mudah dibaca di layar HP.
+3. Seluruh URL ditulis langsung bersih (contoh: 🔗 https://...) tanpa dibungkus tag HTML.
 """
-    if len(news_items) > 1:
-        for idx, it in enumerate(news_items[1:], 2):
-            prompt += f"""{idx}. <b>{it['title']}</b>
-   🔗 <a href="{it['link']}">{it['link']}</a>\n"""
-
-    prompt += "\nPERHATIAN: Cantumkan semua URL secara utuh tanpa disingkat atau dipotong agar pembaca bisa langsung mengklik dan memverifikasi sumber beritanya."
 
     headers = {
         "x-goog-api-key": GEMINI_API_KEY,
@@ -97,16 +125,16 @@ Di bagian paling bawah analisis, Anda WAJIB membuat daftar rujukan lengkap dan d
                     if "text" in c:
                         out += c["text"]
                         
-        out = out.strip()
+        out = clean_text_for_telegram(out.strip())
         
         # Jaminan Keutuhan Rujukan: Pastikan semua link dari news_items tercantum
         missing_links = []
         for idx, it in enumerate(news_items, 1):
             if it['link'] not in out:
-                missing_links.append(f"{idx}. <b>{it['title']}</b>\n   🔗 <a href=\"{it['link']}\">{it['link']}</a>")
+                missing_links.append(f"{idx}. {it['title']}\n   🔗 {it['link']}")
                 
         if missing_links:
-            out += "\n\n📚 <b>Rujukan Tambahan Terverifikasi:</b>\n" + "\n".join(missing_links)
+            out += "\n\n📚 RUJUKAN TAMBAHAN TERVERIFIKASI:\n" + "\n".join(missing_links)
             
         return out
     except Exception as e:
@@ -148,30 +176,25 @@ def split_text_into_chunks(text, max_len=3700):
     return chunks
 
 def send_telegram(text):
-    chunks = split_text_into_chunks(text, max_len=3700)
+    clean_text = clean_text_for_telegram(text)
+    chunks = split_text_into_chunks(clean_text, max_len=3700)
     total_parts = len(chunks)
     
     for idx, chunk in enumerate(chunks):
         formatted_chunk = chunk
         if total_parts > 1:
             if idx == 0:
-                formatted_chunk = f"{chunk}\n\n<i>[Bagian 1/{total_parts}] ⏩ (Bersambung ke chat berikutnya...)</i>"
+                formatted_chunk = f"{chunk}\n\n[Bagian 1/{total_parts}] ⏩ (Bersambung ke chat berikutnya...)"
             else:
-                formatted_chunk = f"<i>[Bagian {idx+1}/{total_parts}] 📄 (Lanjutan chat sebelumnya)</i>\n\n{chunk}"
+                formatted_chunk = f"[Bagian {idx+1}/{total_parts}] 📄 (Lanjutan chat sebelumnya)\n\n{chunk}"
                 
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": formatted_chunk,
-            "parse_mode": "HTML",
             "disable_web_page_preview": False
         }
         try:
-            r = requests.post(TELEGRAM_API_URL, json=payload, timeout=12)
-            res = r.json()
-            if not res.get("ok"):
-                # Fallback tanpa HTML jika perbatasan chunk memotong tag formating
-                payload.pop("parse_mode", None)
-                requests.post(TELEGRAM_API_URL, json=payload, timeout=12)
+            requests.post(TELEGRAM_API_URL, json=payload, timeout=12)
         except Exception as e:
             print(f"Failed to send chunk {idx+1}/{total_parts}: {e}")
             
@@ -190,7 +213,7 @@ def run_hourly_intelligence():
         max_items=3
     )
     analysis1 = ask_gemini_critical("AI Global", news1)
-    msg1 = f"🧭 <b>STRATEGIC BRIEFING [1/3]</b>\n🤖 <b>POKOK 1: ARTIFICIAL INTELLIGENCE (GLOBAL)</b>\n📅 <i>{now_str}</i>\n━━━━━━━━━━━━━━━━━━\n{analysis1}"
+    msg1 = f"🧭 STRATEGIC BRIEFING [1/3]\n🤖 POKOK 1: ARTIFICIAL INTELLIGENCE (GLOBAL)\n📅 {now_str}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{analysis1}"
     send_telegram(msg1)
     time.sleep(2)
 
@@ -202,7 +225,7 @@ def run_hourly_intelligence():
         max_items=3
     )
     analysis2 = ask_gemini_critical("Audit Keuangan RI", news2)
-    msg2 = f"🧭 <b>STRATEGIC BRIEFING [2/3]</b>\n⚖️ <b>POKOK 2: AUDIT KEUANGAN NEGARA (RI)</b>\n🏛️ <i>BPK RI • BPKP • Kejaksaan RI • KPK</i>\n📅 <i>{now_str}</i>\n━━━━━━━━━━━━━━━━━━\n{analysis2}"
+    msg2 = f"🧭 STRATEGIC BRIEFING [2/3]\n⚖️ POKOK 2: AUDIT KEUANGAN NEGARA (RI)\n🏛️ BPK RI • BPKP • Kejaksaan RI • KPK\n📅 {now_str}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{analysis2}"
     send_telegram(msg2)
     time.sleep(2)
 
@@ -214,7 +237,7 @@ def run_hourly_intelligence():
         max_items=3
     )
     analysis3 = ask_gemini_critical("Saham BEI", news3)
-    msg3 = f"🧭 <b>STRATEGIC BRIEFING [3/3]</b>\n📈 <b>POKOK 3: PASAR SAHAM BEI & ARUS DANA</b>\n📊 <i>IHSG • Likuiditas Asing • Saham Penggerak</i>\n📅 <i>{now_str}</i>\n━━━━━━━━━━━━━━━━━━\n{analysis3}"
+    msg3 = f"🧭 STRATEGIC BRIEFING [3/3]\n📈 POKOK 3: PASAR SAHAM BEI & ARUS DANA\n📊 IHSG • Likuiditas Asing • Saham Penggerak\n📅 {now_str}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{analysis3}"
     send_telegram(msg3)
     print("All 3 grounded briefings sent successfully!")
 
